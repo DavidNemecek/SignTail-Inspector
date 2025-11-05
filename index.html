@@ -1,0 +1,43 @@
+    function clonePdfBytes(bytes) {
+      if (!bytes) {
+        return null;
+      }
+      if (bytes instanceof Uint8Array) {
+        return new Uint8Array(bytes);
+      }
+      if (ArrayBuffer.isView(bytes)) {
+        const view = bytes;
+        return new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
+      }
+      if (bytes instanceof ArrayBuffer) {
+        return new Uint8Array(bytes.slice(0));
+      }
+      return new Uint8Array(bytes);
+    }
+
+      const finalDataBytes = clonePdfBytes(finalBytes);
+      const baseDataBytes = baseBytes ? clonePdfBytes(baseBytes) : null;
+
+      if (baseDataBytes) {
+        try {
+          baseDoc = await pdfjsLib.getDocument({ data: baseDataBytes }).promise;
+        } catch (error) {
+          console.warn('Signierter Stand konnte nicht vollständig geladen werden:', error);
+          baseDoc = null;
+        }
+        finalDoc = await pdfjsLib.getDocument({ data: finalDataBytes }).promise;
+          try {
+            await basePage.render({ canvasContext: baseContext, viewport }).promise;
+          } catch (error) {
+            console.warn('Seite des Basisdokuments konnte nicht gerendert werden:', error);
+            basePage = null;
+            baseContext.fillStyle = '#ffffff';
+            baseContext.fillRect(0, 0, baseCanvas.width, baseCanvas.height);
+          }
+        let baseData;
+        if (basePage) {
+          baseData = baseContext.getImageData(0, 0, baseCanvas.width, baseCanvas.height);
+        } else {
+          baseContext.putImageData(finalData, 0, 0);
+          baseData = finalData;
+        }

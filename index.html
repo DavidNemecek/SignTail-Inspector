@@ -24,10 +24,47 @@
       padding: 1.5rem 2rem 1rem;
       border-bottom: 1px solid rgba(255, 255, 255, 0.06);
       display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .header-main {
+      display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 1.5rem;
-      flex-wrap: wrap;
+      width: 100%;
+    }
+
+    /* Warning banner shown when unsigned (incremental) objects are present */
+    .warning-banner {
+      display: none;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 0.75rem 1.25rem;
+      background: linear-gradient(90deg, #6b0000, #8b0000);
+      color: #fff;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      align-items: center;
+      gap: 0.75rem;
+      justify-content: center;
+    }
+
+    .warning-banner.show {
+      display: flex;
+    }
+
+    .warning-banner .icon {
+      width: 20px;
+      height: 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      border-radius: 4px;
+      font-weight: 800;
     }
 
     h1 {
@@ -411,15 +448,22 @@
 </head>
 <body>
   <header>
-    <h1 data-i18n="appTitle">SignTail Inspector</h1>
-    <div class="header-actions">
-      <label for="languageSelect">
-        <span data-i18n="languageLabel">Language</span>
-        <select id="languageSelect">
-          <option value="en">English</option>
-          <option value="de">Deutsch</option>
-        </select>
-      </label>
+    <div class="header-main">
+      <h1 data-i18n="appTitle">SignTail Inspector</h1>
+      <div class="header-actions">
+        <label for="languageSelect">
+          <span data-i18n="languageLabel">Language</span>
+          <select id="languageSelect">
+            <option value="en">English</option>
+            <option value="de">Deutsch</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div id="unsignedBanner" class="warning-banner" role="status" aria-live="polite" style="display: none;">
+      <div class="icon">!</div>
+      <div id="unsignedBannerText"></div>
+      <div class="icon">!</div>
     </div>
   </header>
   <main>
@@ -478,6 +522,7 @@
         appTitle: 'SignTail Inspector',
         languageLabel: 'Language',
         dropMessage: 'Drop a signed PDF here or <span class="accent">browse</span>',
+        unsignedBanner: 'Unsigned objects found in this file!',
         summaryTitle: 'Summary',
         summaryStatusLabel: 'Status',
         summaryWaiting: 'Waiting for PDF…',
@@ -524,11 +569,13 @@
         objectSummaryRect: 'Rect {rect}',
         signatureFallbackMessage: 'Signature is not available.',
         unknownValue: 'Unknown',
+        unsignedBanner: 'There are incremental objects present that are not part of the signed range.',
       },
       de: {
         appTitle: 'SignTail Inspector',
         languageLabel: 'Sprache',
         dropMessage: 'Signiertes PDF hier ablegen oder <span class="accent">durchsuchen</span>',
+        unsignedBanner: 'Es wurden nicht signierte Objekte in der Datei gefunden!',
         summaryTitle: 'Übersicht',
         summaryStatusLabel: 'Status',
         summaryWaiting: 'Warte auf PDF…',
@@ -575,11 +622,12 @@
         objectSummaryRect: 'Rechteck {rect}',
         signatureFallbackMessage: 'Keine Signatur verfügbar.',
         unknownValue: 'Unbekannt',
+        unsignedBanner: 'Es wurden inkrementelle Objekte gefunden, die nicht Teil des signierten Bereichs sind.',
       },
     };
 
-    const browserLanguage = (navigator.language || 'en').toLowerCase();
-    const initialLanguage = browserLanguage.startsWith('de') ? 'de' : 'en';
+    const browserLanguage = (navigator.language || 'de').toLowerCase();
+    const initialLanguage = 'de';
 
     const state = {
       finalBytes: null,
@@ -731,7 +779,8 @@
           pageRef,
           pageIndex: null,
           overlayElements: [],
-          active: false,
+          // Default: show all objects when present
+          active: true,
           type,
           offset: objectOffset,
         });
@@ -1468,6 +1517,12 @@
         }
         await mapObjectsToPages(finalDoc, objects);
         renderObjectList(objects);
+        // After pages and overlays exist, ensure active objects have their overlays created
+        for (const obj of objects) {
+          if (obj.active) {
+            toggleObjectOverlay(obj, true);
+          }
+        }
         applyViewMode(state.viewMode);
       } catch (error) {
         console.error('Render error:', error);
@@ -1584,6 +1639,10 @@
     function renderObjectList(objects) {
       elements.objectList.innerHTML = '';
       if (!objects.length) {
+        // hide unsigned banner when no objects
+        const banner = document.getElementById('unsignedBanner');
+        if (banner) banner.style.display = 'none';
+        
         elements.objectList.classList.add('empty-state');
         elements.objectList.textContent = state.hasLoadedDocument ? t('summaryObjectsNone') : t('objectListEmpty');
         if (state.hasLoadedDocument) {
@@ -1595,6 +1654,13 @@
       }
       elements.objectList.classList.remove('empty-state');
       elements.objectList.removeAttribute('data-i18n');
+      // show unsigned banner if objects exist
+      const banner = document.getElementById('unsignedBanner');
+      if (banner) {
+        banner.style.display = 'flex';
+        const txt = document.getElementById('unsignedBannerText');
+        if (txt) txt.textContent = t('unsignedBanner');
+      }
       for (const obj of objects) {
         const entry = document.createElement('div');
         entry.className = 'object-entry';
@@ -1606,7 +1672,7 @@
         const label = document.createElement('label');
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.checked = obj.active;
+  checkbox.checked = obj.active;
         checkbox.addEventListener('change', () => {
           toggleObjectOverlay(obj, checkbox.checked);
           entry.classList.toggle('active', checkbox.checked);
@@ -1650,6 +1716,11 @@
         entry.appendChild(raw);
 
         elements.objectList.appendChild(entry);
+        // ensure overlays are applied for default-active objects after being added to DOM
+        if (obj.active) {
+          // toggle on to create overlays; if already active it will still create
+          toggleObjectOverlay(obj, true);
+        }
       }
     }
 

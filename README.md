@@ -1,37 +1,34 @@
 # SignTail Inspector
 
-## Beschreibung
-SignTail Inspector ist eine vollständig lokale HTML-Anwendung, die signierte PDFs parallel rendert und forensisch analysiert. Eine eingebettete, offline ausgelieferte pdf.js-Engine stellt sowohl den signierten Grundzustand als auch die inkrementellen Nachträge dar. Gefundene Objekte lassen sich per Checkbox gezielt aktivieren, sodass ihre Inhalte als Overlay direkt in der Vorschau erscheinen oder ausgeblendet bleiben. Alle Schritte laufen offline im Browser – es werden keinerlei Dateien hochgeladen.
+SignTail Inspector ist eine vollständig lokale HTML-Anwendung zur forensischen Analyse signierter PDF-Dokumente. Die Seite kombiniert einen eingebetteten pdf.js-Viewer, kryptografische Signaturprüfungen sowie eine Auflistung aller inkrementellen Objekt-Nachträge. Sämtliche Verarbeitungsschritte erfolgen offline im Browser – es werden keine Dateien an einen Server übertragen.
 
-## Funktionsweise
-1. Das ausgewählte PDF wird als `Uint8Array` eingelesen. Aus dem `/ByteRange` wird der signierte Stand rekonstruiert und gemeinsam mit dem finalen Dokument über die eingebettete pdf.js-Engine gerendert.
-2. Der `/ByteRange` der Signatur wird geparst, um die beiden signierten Segmente exakt zu bestimmen.
-3. Der zugehörige `/Contents`-Eintrag wird als PKCS#7/CMS-Signatur dekodiert. Anhand von Issuer und Seriennummer wird das passende Zertifikat gewählt, die `signedAttributes` werden DER-konform rekodiert, der `messageDigest` validiert und die Signatur mit der WebCrypto-API (RSA oder ECDSA) mathematisch verifiziert.
-4. Der Bereich hinter dem Ende des ByteRange wird als inkrementelles Update interpretiert. Dort sucht das Tool nach neuen `obj ... endobj`-Blöcken, ermittelt Schlüsselwörter wie `/OCG`, `/OptionalContentGroup`, `/XObject`, `/Subtype /Image`, `stream`, `/Annots` oder `/AcroForm` und erstellt strukturierte Funde.
-5. Beim Rendern werden die signierten Seiten und die finale Version pixelweise verglichen. Unterschiedliche Bildbereiche werden freigestellt, sodass die Nachträge separat als Overlay eingeblendet werden können.
-6. Für jedes gefundene Objekt steht eine Checkbox zur Verfügung. Darüber können Rohdaten sichtbar gemacht und die zugehörigen Overlays in der Vorschau ein- oder ausgeblendet werden; die Buttons „Alle einblenden/Alle ausblenden“ steuern sämtliche sichtbaren Layer gemeinsam.
-7. Die kryptografische Bewertung (Hash-Vergleich, Signaturprüfung und Zertifikatsinformationen) wird zusammen mit Hinweisen in der Zusammenfassung angezeigt.
+## Funktionsumfang
 
-## Kategorien
-- **Kategorie 1 – signierter Stand unverändert:** Signatur mathematisch gültig, keine nachträglichen Objekte erkannt.
-- **Kategorie 2 – unklar / Formular- oder Layer-Update:** Nachträgliche Objekte enthalten überwiegend Formulare, Annotationen oder OCG-Strukturen.
-- **Kategorie 3 – hohe Wahrscheinlichkeit für Manipulation:** Signatur ungültig oder nachträgliche Objekte deuten auf sichtbare Inhalte, XObjects oder andere Layout-Änderungen hin.
-- **Kategorie 4 – keine Signatur:** Kein `/ByteRange` vorhanden; das Dokument ist unsigniert.
+- **Paralleles Rendering:** Der signierte Ausgangsstand und das finale Dokument werden nebeneinander gerendert, um Differenzen schnell sichtbar zu machen.
+- **Automatische Objekt-Aktivierung:** Alle gefundenen, nicht signierten Objekte werden nach dem Laden eines Dokuments sofort aktiviert und – sofern Geometrieinformationen vorliegen – als Overlay in der Vorschau hervorgehoben.
+- **Deutlicher Warnhinweis:** Sobald nachsignierte oder anderweitig unsignierte Objekte erkannt werden, erscheint unterhalb des Headers ein roter Warnbalken mit Ausrufezeichen über die gesamte Breite der Seite.
+- **Übersichtliche Objektliste:** Für jedes Objekt stehen Metadaten, erkannte Koordinaten und ein Rohdaten-Ausschnitt bereit. Mit den Buttons „Alle anzeigen/Ausblenden“ lässt sich die Sichtbarkeit zentral steuern.
+- **Mehrsprachige Oberfläche:** Die Benutzeroberfläche kann per Dropdown zwischen Deutsch und Englisch wechseln.
 
-## Layer- und Objekt-Ansicht
-Die Layer-Liste kombiniert Rohdaten mit einer visuellen Heuristik: Für jedes Objekt werden erkannte Koordinaten (z. B. `/Rect`, `/BBox`, `QuadPoints`) auf die pdf.js-Vorschau projiziert und die Differenz zum signierten Ursprung als transparentes Overlay eingeblendet. Wo keine Koordinaten vorliegen, wird – sofern ein Pixel-Differenzbild existiert – ein grobes Änderungsrechteck angezeigt. Komprimierte Streams (etwa mit `/Filter /FlateDecode`) können nur als potenziell relevante Daten markiert werden; fehlt jede Positionsinformation, bleibt die Checkbox deaktiviert. Über die Checkboxen lassen sich einzelne Objekte oder komplette Gruppen („Alle einblenden/Alle ausblenden“) sichtbar machen, sodass nachträgliche Ergänzungen schnell isoliert werden können.
+## Nutzung
 
-## PDF-Vorschau
-Das PDF wird vollständig innerhalb der Seite mit einer eingebetteten pdf.js-Instanz gerendert. Standardmäßig zeigt die Vorschau den signierten Stand; aktivierte Nachträge werden als zusätzliche Ebenen eingeblendet. So lässt sich unmittelbar nachvollziehen, welche Inhalte erst nach der Signatur hinzugekommen sind.
+1. Öffnen Sie die Datei `index.html` direkt im Browser (z. B. per Doppelklick oder über einen lokalen Webserver).
+2. Ziehen Sie ein signiertes PDF auf die Upload-Fläche oder wählen Sie eine Datei über den Dateidialog aus.
+3. Nach dem Laden zeigt die Zusammenfassung Dateiname, Signaturstatus, ByteRange und Anzahl der gefundenen Objekte an.
+4. Sind nicht signierte Objekte vorhanden, werden sie automatisch markiert, das entsprechende Overlay aktiviert und der Warnbalken eingeblendet.
+5. Nutzen Sie die Objektliste, um einzelne Einträge ein- oder auszublenden, Rohdaten anzusehen oder sich auf bestimmte Seiten zu fokussieren.
 
-## Demos
-Legen Sie Beispiel-PDFs in den Ordner `Demos/`, der sich neben `index.html` befindet. Öffnen Sie `index.html` direkt im Browser (z. B. per Doppelklick) und wählen Sie die gewünschte Demo-Datei über den Datei-Dialog aus. Reine HTML/JS-Seiten können ohne Webserver nicht automatisch auf den Ordner zugreifen; die Datei muss manuell ausgewählt werden.
+## Demos & Beispiele
 
-## Limitierungen
-- Keine PKI-Validierung der Zertifikatskette: OCSP-, CRL- oder Vertrauenskettentests werden nicht durchgeführt.
-- Komprimierte oder verschlüsselte PDF-Objekte lassen sich nur begrenzt analysieren; es erfolgt eine textuelle Markierung ohne Dekompression.
-- Die Overlays basieren auf heuristisch extrahierten Koordinaten und Pixel-Differenzen; je nach PDF können Position und Größe abweichen oder komplett fehlen.
-- Das Ergebnis ist keine rechtsverbindliche Signaturprüfung und ersetzt keine tiefgehende forensische Analyse.
+Beispieldateien können im Ordner `demos/` abgelegt werden. Da die Anwendung rein statisch ist, muss die gewünschte Datei manuell über den Dateidialog ausgewählt werden – ein direkter Zugriff auf das Dateisystem ist aus Sicherheitsgründen nicht möglich.
 
-## Sicherheit
-Alle Operationen laufen vollständig lokal im Browser. Es gibt keinerlei Netzwerkkommunikation oder Datei-Uploads; Zertifikate und Signaturen werden ausschließlich clientseitig verarbeitet.
+## Grenzen der Analyse
+
+- Die Zertifikatskette wird nicht gegen externe Vertrauensanker, OCSP oder CRLs geprüft.
+- Komprimierte, verschlüsselte oder anderweitig binäre PDF-Objekte lassen sich nur eingeschränkt interpretieren; sie werden textuell markiert, bleiben aber im Zweifelsfall unvollständig.
+- Positionsangaben werden heuristisch aus `/Rect`, `/BBox`, `QuadPoints` & Co. gewonnen. Je nach PDF-Struktur können Überlagerungen daher leicht abweichen oder komplett fehlen.
+- Die Auswertung ersetzt keine rechtlich verbindliche Signaturprüfung oder eine umfassende forensische Analyse.
+
+## Datenschutz & Sicherheit
+
+Alle Operationen laufen lokal im Browser. Weder PDF-Dateien noch Zertifikatsinformationen verlassen das Gerät, wodurch Signaturprüfungen auch in sensiblen Umgebungen ohne Netzwerkzugriff möglich sind.

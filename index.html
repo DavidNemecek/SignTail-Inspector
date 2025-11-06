@@ -590,6 +590,7 @@
       pageViewports: new Map(),
       pageBoxes: new Map(),
       pageCanvases: new Map(),
+      pageRefs: new Map(),
       viewMode: 'final',
       renderToken: 0,
       currentDoc: null,
@@ -790,6 +791,44 @@
         }
       }
       return rects;
+    }
+
+    function makeRefKey(ref) {
+      if (!ref || typeof ref.num !== 'number' || typeof ref.gen !== 'number') {
+        return null;
+      }
+      return `${ref.num}:${ref.gen}`;
+    }
+
+    function extractReferenceArray(body, key) {
+      const results = [];
+      if (typeof body !== 'string') {
+        return results;
+      }
+      const arrayRegex = new RegExp(`\/${key}\\s*\\[([^\\]]+)\\]`, 'g');
+      let match;
+      while ((match = arrayRegex.exec(body))) {
+        const refsRaw = match[1];
+        const refRegex = /(\d+)\s+(\d+)\s+R/g;
+        let refMatch;
+        while ((refMatch = refRegex.exec(refsRaw))) {
+          results.push({ num: parseInt(refMatch[1], 10), gen: parseInt(refMatch[2], 10) });
+        }
+      }
+      return results;
+    }
+
+    function extractIndirectReferences(body) {
+      const results = [];
+      if (typeof body !== 'string') {
+        return results;
+      }
+      const refRegex = /(\d+)\s+(\d+)\s+R/g;
+      let match;
+      while ((match = refRegex.exec(body))) {
+        results.push({ num: parseInt(match[1], 10), gen: parseInt(match[2], 10) });
+      }
+      return results;
     }
 
     function classifyObject(body) {
@@ -1340,6 +1379,7 @@
       state.pageViewports.clear();
       state.pageBoxes.clear();
       state.pageCanvases.clear();
+      state.pageRefs.clear();
       elements.objectList.style.height = 'auto';
     }
 
@@ -1407,6 +1447,9 @@
           const unitViewport = page.getViewport({ scale: 1 });
           const viewBox = unitViewport.viewBox || page.view || [0, 0, unitViewport.width, unitViewport.height];
           state.pageBoxes.set(pageNumber - 1, viewBox);
+          if (page.ref) {
+            state.pageRefs.set(pageNumber - 1, page.ref);
+          }
           const { finalCanvas, signedCanvas } = createPageContainer(pageNumber - 1, viewport);
           const finalContext = finalCanvas.getContext('2d');
           await page.render({ canvasContext: finalContext, viewport }).promise;
@@ -1455,16 +1498,81 @@
       return null;
     }
     async function mapObjectsToPages(doc, objects) {
+      const pageRefToIndex = new Map();
+      for (const [pageIndex, ref] of state.pageRefs.entries()) {
+        const key = makeRefKey(ref);
+        if (key !== null) {
+          pageRefToIndex.set(key, pageIndex);
+        }
+      }
+      if (!pageRefToIndex.size && doc) {
+        const total = doc.numPages || 0;
+        for (let pageNumber = 1; pageNumber <= total; pageNumber++) {
+          try {
+            const page = await doc.getPage(pageNumber);
+            const key = makeRefKey(page.ref);
+            if (key !== null) {
+              pageRefToIndex.set(key, pageNumber - 1);
+            }
+          } catch (error) {
+            console.warn('Failed to cache page reference', pageNumber, error);
+          }
+        }
+      }
+
+      const indirectToPage = new Map();
+      for (const [key, pageIndex] of pageRefToIndex.entries()) {
+        indirectToPage.set(key, pageIndex);
+      }
+
+      for (const obj of objects) {
+        const objKey = makeRefKey({ num: obj.objNum, gen: obj.generation });
+        if (objKey && pageRefToIndex.has(objKey)) {
+          const pageIndex = pageRefToIndex.get(objKey);
+          indirectToPage.set(objKey, pageIndex);
+          const annotRefs = extractReferenceArray(obj.content, 'Annots');
+          for (const ref of annotRefs) {
+            const refKey = makeRefKey(ref);
+            if (refKey) {
+              indirectToPage.set(refKey, pageIndex);
+            }
+          }
+        }
+      }
+
+      for (const obj of objects) {
+        const objKey = makeRefKey({ num: obj.objNum, gen: obj.generation });
+        if (!objKey || !indirectToPage.has(objKey) || obj.type !== 'annotation') {
+          continue;
+        }
+        const pageIndex = indirectToPage.get(objKey);
+        const relatedRefs = extractIndirectReferences(obj.content);
+        for (const ref of relatedRefs) {
+          const refKey = makeRefKey(ref);
+          if (refKey && !indirectToPage.has(refKey)) {
+            indirectToPage.set(refKey, pageIndex);
+          }
+        }
+      }
+
       for (const obj of objects) {
         let resolved = false;
         if (obj.pageRef) {
           try {
-            const ref = typeof pdfjsLib.Ref === 'function' ? new pdfjsLib.Ref(obj.pageRef.num, obj.pageRef.gen) : obj.pageRef;
+            const ref =
+              typeof pdfjsLib.Ref === 'function' ? new pdfjsLib.Ref(obj.pageRef.num, obj.pageRef.gen) : obj.pageRef;
             const pageIndex = await doc.getPageIndex(ref);
             obj.pageIndex = pageIndex;
             resolved = true;
           } catch (error) {
             console.warn('Failed to resolve page reference', obj.pageRef, error);
+          }
+        }
+        if (!resolved) {
+          const objKey = makeRefKey({ num: obj.objNum, gen: obj.generation });
+          if (objKey && indirectToPage.has(objKey)) {
+            obj.pageIndex = indirectToPage.get(objKey);
+            resolved = true;
           }
         }
         if (!resolved) {

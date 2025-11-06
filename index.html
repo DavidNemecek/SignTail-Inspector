@@ -1,43 +1,1462 @@
-    function clonePdfBytes(bytes) {
-      if (!bytes) {
-        return null;
-      }
-      if (bytes instanceof Uint8Array) {
-        return new Uint8Array(bytes);
-      }
-      if (ArrayBuffer.isView(bytes)) {
-        const view = bytes;
-        return new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
-      }
-      if (bytes instanceof ArrayBuffer) {
-        return new Uint8Array(bytes.slice(0));
-      }
-      return new Uint8Array(bytes);
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SignTail Inspector</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: "Inter", "Segoe UI", sans-serif;
+      background: #0f1117;
+      color: #e6e8ef;
     }
 
-      const finalDataBytes = clonePdfBytes(finalBytes);
-      const baseDataBytes = baseBytes ? clonePdfBytes(baseBytes) : null;
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(180deg, #151820 0%, #0f1117 100%);
+    }
 
-      if (baseDataBytes) {
-        try {
-          baseDoc = await pdfjsLib.getDocument({ data: baseDataBytes }).promise;
-        } catch (error) {
-          console.warn('Signierter Stand konnte nicht vollständig geladen werden:', error);
-          baseDoc = null;
-        }
-        finalDoc = await pdfjsLib.getDocument({ data: finalDataBytes }).promise;
-          try {
-            await basePage.render({ canvasContext: baseContext, viewport }).promise;
-          } catch (error) {
-            console.warn('Seite des Basisdokuments konnte nicht gerendert werden:', error);
-            basePage = null;
-            baseContext.fillStyle = '#ffffff';
-            baseContext.fillRect(0, 0, baseCanvas.width, baseCanvas.height);
-          }
-        let baseData;
-        if (basePage) {
-          baseData = baseContext.getImageData(0, 0, baseCanvas.width, baseCanvas.height);
+    header {
+      padding: 1.5rem 2rem 1rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.75rem;
+      letter-spacing: 0.04em;
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      gap: 1rem;
+      padding: 1rem 2rem 2rem;
+      box-sizing: border-box;
+    }
+
+    #sidebar {
+      flex: 0 0 360px;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    #viewerPanel {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .panel {
+      background: rgba(24, 28, 38, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+      padding: 1rem 1.25rem;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
+    }
+
+    #dropZone {
+      border: 2px dashed rgba(118, 135, 187, 0.4);
+      border-radius: 16px;
+      padding: 1.25rem;
+      text-align: center;
+      transition: border-color 0.25s ease, background 0.25s ease;
+      cursor: pointer;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+    }
+
+    #dropZone.dragover {
+      border-color: #7aa7ff;
+      background: rgba(122, 167, 255, 0.08);
+    }
+
+    #fileInput {
+      display: none;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.4rem 0.75rem;
+      font-size: 0.95rem;
+    }
+
+    .summary-grid .label {
+      color: rgba(230, 232, 239, 0.65);
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+    }
+
+    .summary-grid .value {
+      font-weight: 500;
+      color: #f4f6ff;
+    }
+
+    #objectControls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+      gap: 0.5rem;
+    }
+
+    #objectControls button {
+      padding: 0.35rem 0.75rem;
+      border-radius: 999px;
+      border: 1px solid rgba(122, 167, 255, 0.4);
+      background: transparent;
+      color: #c9d6ff;
+      cursor: pointer;
+      font-size: 0.8rem;
+      transition: background 0.25s ease, border-color 0.25s ease;
+    }
+
+    #objectControls button:hover {
+      background: rgba(122, 167, 255, 0.16);
+      border-color: rgba(122, 167, 255, 0.6);
+    }
+
+    #objectList {
+      max-height: calc(100vh - 420px);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      padding-right: 0.3rem;
+    }
+
+    .object-entry {
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 12px;
+      padding: 0.75rem;
+      background: rgba(16, 19, 28, 0.85);
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .object-entry.active {
+      border-color: rgba(120, 194, 255, 0.8);
+      box-shadow: 0 0 0 1px rgba(120, 194, 255, 0.4);
+    }
+
+    .object-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      justify-content: space-between;
+    }
+
+    .object-header label {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      flex: 1;
+      cursor: pointer;
+    }
+
+    .object-header span {
+      font-weight: 600;
+    }
+
+    .object-meta {
+      font-size: 0.8rem;
+      color: rgba(200, 206, 224, 0.75);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.75rem;
+    }
+
+    .object-actions {
+      display: flex;
+      gap: 0.35rem;
+    }
+
+    .object-actions button {
+      border-radius: 8px;
+      background: rgba(33, 39, 52, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: rgba(214, 223, 255, 0.85);
+      font-size: 0.75rem;
+      padding: 0.35rem 0.6rem;
+      cursor: pointer;
+    }
+
+    .object-actions button:hover {
+      background: rgba(90, 110, 168, 0.4);
+    }
+
+    .object-raw {
+      display: none;
+      white-space: pre-wrap;
+      background: rgba(10, 12, 18, 0.9);
+      border-radius: 8px;
+      padding: 0.5rem;
+      font-family: "Fira Code", "SFMono-Regular", monospace;
+      font-size: 0.75rem;
+      color: rgba(200, 214, 255, 0.95);
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .object-entry.show-raw .object-raw {
+      display: block;
+    }
+
+    #viewerControls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    #viewMode {
+      background: rgba(33, 39, 52, 0.9);
+      color: rgba(214, 223, 255, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 0.4rem 0.65rem;
+    }
+
+    #pdfViewer {
+      flex: 1;
+      overflow-y: auto;
+      background: rgba(12, 15, 22, 0.75);
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      position: relative;
+    }
+
+    .page-container {
+      position: relative;
+      width: fit-content;
+      margin: 0 auto;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+      background: #fff;
+    }
+
+    .page-container canvas {
+      display: block;
+      background: #fff;
+    }
+
+    .overlay-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+    }
+
+    .highlight-box {
+      position: absolute;
+      border: 2px solid rgba(255, 99, 132, 0.8);
+      background: rgba(255, 99, 132, 0.25);
+      border-radius: 4px;
+      box-shadow: 0 0 0 1px rgba(255, 99, 132, 0.6);
+      mix-blend-mode: multiply;
+    }
+
+    #loadingOverlay {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10, 12, 18, 0.78);
+      z-index: 20;
+    }
+
+    #loadingOverlay.active {
+      display: flex;
+    }
+
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: 4px solid rgba(255, 255, 255, 0.2);
+      border-top-color: rgba(122, 167, 255, 0.9);
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .status-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .status-tag.valid {
+      background: rgba(72, 199, 142, 0.18);
+      color: #7dfdc6;
+      border: 1px solid rgba(72, 199, 142, 0.4);
+    }
+
+    .status-tag.invalid {
+      background: rgba(255, 118, 118, 0.18);
+      color: #ffb9b9;
+      border: 1px solid rgba(255, 118, 118, 0.4);
+    }
+
+    .status-tag.warning {
+      background: rgba(255, 193, 77, 0.18);
+      color: #ffd394;
+      border: 1px solid rgba(255, 193, 77, 0.4);
+    }
+
+    .signature-details {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      font-size: 0.85rem;
+    }
+
+    .signature-details strong {
+      font-weight: 600;
+      color: #f8faff;
+    }
+
+    .empty-state {
+      padding: 1rem;
+      text-align: center;
+      color: rgba(200, 206, 224, 0.7);
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 1100px) {
+      main {
+        flex-direction: column;
+      }
+
+      #sidebar {
+        flex: 0 0 auto;
+      }
+
+      #objectList {
+        max-height: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SignTail Inspector</h1>
+  </header>
+  <main>
+    <aside id="sidebar">
+      <section class="panel">
+        <div id="dropZone">
+          <div>Drop a signed PDF here or <span style="color:#7aa7ff; text-decoration:underline;">browse</span></div>
+          <div style="font-size:0.8rem; margin-top:0.4rem; color:rgba(200,206,224,0.7);">Demo files available in the <code>demos/</code> folder.</div>
+        </div>
+        <input id="fileInput" type="file" accept="application/pdf" />
+      </section>
+      <section class="panel">
+        <h2 style="margin:0 0 0.75rem; font-size:1rem; letter-spacing:0.05em; text-transform:uppercase; color:rgba(200,206,224,0.8);">Summary</h2>
+        <div class="summary-grid" id="summaryList">
+          <span class="label">Status</span>
+          <span class="value">Waiting for PDF…</span>
+        </div>
+      </section>
+      <section class="panel" style="flex:1; display:flex; flex-direction:column; min-height:0;">
+        <div id="objectControls">
+          <h2 style="margin:0; font-size:1rem; letter-spacing:0.05em; text-transform:uppercase; color:rgba(200,206,224,0.8);">Objects</h2>
+          <div style="display:flex; gap:0.4rem;">
+            <button id="showAll">Show all</button>
+            <button id="hideAll">Hide all</button>
+          </div>
+        </div>
+        <div id="objectList" class="empty-state">Load a signed PDF to inspect incremental objects.</div>
+      </section>
+    </aside>
+    <section id="viewerPanel">
+      <section class="panel" id="viewerControls">
+        <div>
+          <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.08em; color:rgba(200,206,224,0.7);">View mode</div>
+          <select id="viewMode">
+            <option value="final">Final document</option>
+            <option value="signed">Signed snapshot</option>
+            <option value="compare">Split (signed & final)</option>
+          </select>
+        </div>
+        <div id="signatureSummary" class="signature-details" style="flex:1; align-items:flex-end; text-align:right;"></div>
+      </section>
+      <section class="panel" style="flex:1; position:relative;">
+        <div id="loadingOverlay"><div class="spinner"></div></div>
+        <div id="pdfViewer"></div>
+      </section>
+    </section>
+  </main>
+
+  <script src="vendor/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+
+    const state = {
+      finalBytes: null,
+      baseBytes: null,
+      byteRange: null,
+      objects: [],
+      overlayLayers: new Map(),
+      pageViewports: new Map(),
+      pageBoxes: new Map(),
+      pageCanvases: new Map(),
+      viewMode: 'final',
+      renderToken: 0,
+      currentDoc: null,
+      baseDoc: null,
+      signatureInfo: null,
+      fileName: null,
+    };
+
+    const elements = {
+      dropZone: document.getElementById('dropZone'),
+      fileInput: document.getElementById('fileInput'),
+      summaryList: document.getElementById('summaryList'),
+      objectList: document.getElementById('objectList'),
+      pdfViewer: document.getElementById('pdfViewer'),
+      loadingOverlay: document.getElementById('loadingOverlay'),
+      viewMode: document.getElementById('viewMode'),
+      signatureSummary: document.getElementById('signatureSummary'),
+      showAll: document.getElementById('showAll'),
+      hideAll: document.getElementById('hideAll'),
+    };
+
+    const decoderLatin1 = new TextDecoder('latin1');
+
+    function setLoading(active) {
+      elements.loadingOverlay.classList.toggle('active', active);
+    }
+
+    function updateSummary(entries) {
+      elements.summaryList.innerHTML = '';
+      for (const [label, value] of entries) {
+        const labelEl = document.createElement('span');
+        labelEl.className = 'label';
+        labelEl.textContent = label;
+        const valueEl = document.createElement('span');
+        valueEl.className = 'value';
+        if (value instanceof Node) {
+          valueEl.appendChild(value);
         } else {
-          baseContext.putImageData(finalData, 0, 0);
-          baseData = finalData;
+          valueEl.textContent = value;
         }
+        elements.summaryList.append(labelEl, valueEl);
+      }
+    }
+
+    function sanitizeContent(content) {
+      const cleaned = content.replace(/[^\x09\x0a\x0d\x20-\x7e]/g, ' ');
+      return cleaned.trim();
+    }
+
+    function parseByteRange(pdfText) {
+      const match = pdfText.match(/\/ByteRange\s*\[([^\]]+)\]/);
+      if (!match) {
+        return null;
+      }
+      const values = match[1]
+        .trim()
+        .split(/\s+/)
+        .map((v) => parseInt(v, 10))
+        .filter((v) => Number.isFinite(v));
+      if (values.length !== 4) {
+        return null;
+      }
+      return values;
+    }
+
+    function parseSignatureContents(pdfText) {
+      const match = pdfText.match(/\/Contents\s*<([0-9A-Fa-f\s]+)>/);
+      if (!match) {
+        return null;
+      }
+      const hex = match[1].replace(/\s+/g, '');
+      return hex;
+    }
+
+    function parseIncrementalObjects(pdfText, baseOffset) {
+      const results = [];
+      const objectRegex = /(\d+)\s+(\d+)\s+obj\b([\s\S]*?)(?:endobj)/g;
+      let match;
+      while ((match = objectRegex.exec(pdfText))) {
+        const [full, objNum, generation, body] = match;
+        const content = sanitizeContent(body);
+        const objectOffset = baseOffset + match.index;
+        const rects = extractRectangles(body);
+        const pageRef = extractPageReference(body);
+        const type = classifyObject(body);
+        const summary = buildObjectSummary(objNum, generation, type, rects, null);
+        results.push({
+          objNum: parseInt(objNum, 10),
+          generation: parseInt(generation, 10),
+          content,
+          rects,
+          pageRef,
+          pageIndex: null,
+          overlayElements: [],
+          active: false,
+          type,
+          offset: objectOffset,
+          summary,
+        });
+      }
+      return results;
+    }
+
+    function extractPageReference(body) {
+      const match = body.match(/\/(?:P|Parent)\s+(\d+)\s+(\d+)\s+R/);
+      if (!match) {
+        return null;
+      }
+      return { num: parseInt(match[1], 10), gen: parseInt(match[2], 10) };
+    }
+
+    function parseNumberArray(raw) {
+      return raw
+        .trim()
+        .replace(/\s+/g, ' ')
+        .split(' ')
+        .map((v) => parseFloat(v))
+        .filter((v) => !Number.isNaN(v));
+    }
+
+    function extractRectangles(body) {
+      const rects = [];
+      const rectRegex = /\/Rect\s*\[([^\]]+)\]/g;
+      let rectMatch;
+      while ((rectMatch = rectRegex.exec(body))) {
+        const numbers = parseNumberArray(rectMatch[1]);
+        if (numbers.length >= 4) {
+          rects.push(numbers.slice(0, 4));
+        }
+      }
+      const bboxRegex = /\/BBox\s*\[([^\]]+)\]/g;
+      let bboxMatch;
+      while ((bboxMatch = bboxRegex.exec(body))) {
+        const numbers = parseNumberArray(bboxMatch[1]);
+        if (numbers.length >= 4) {
+          rects.push(numbers.slice(0, 4));
+        }
+      }
+      const quadRegex = /\/QuadPoints\s*\[([^\]]+)\]/g;
+      let quadMatch;
+      while ((quadMatch = quadRegex.exec(body))) {
+        const values = parseNumberArray(quadMatch[1]);
+        for (let i = 0; i + 7 < values.length; i += 8) {
+          const quad = values.slice(i, i + 8);
+          const xs = [quad[0], quad[2], quad[4], quad[6]];
+          const ys = [quad[1], quad[3], quad[5], quad[7]];
+          rects.push([
+            Math.min(...xs),
+            Math.min(...ys),
+            Math.max(...xs),
+            Math.max(...ys),
+          ]);
+        }
+      }
+      return rects;
+    }
+
+    function classifyObject(body) {
+      if (/\/Type\s*\/Annot/i.test(body)) {
+        if (/\/Subtype\s*\/Widget/i.test(body)) {
+          return 'Form field';
+        }
+        if (/\/Subtype\s*\/Text/i.test(body)) {
+          return 'Text annotation';
+        }
+        return 'Annotation';
+      }
+      if (/\/Type\s*\/OCG/i.test(body) || /\/OCG/i.test(body)) {
+        return 'Optional content group';
+      }
+      if (/\/Subtype\s*\/Image/i.test(body)) {
+        return 'Image XObject';
+      }
+      if (/\/Subtype\s*\/Form/i.test(body)) {
+        return 'Form XObject';
+      }
+      if (/\/AcroForm/i.test(body)) {
+        return 'AcroForm update';
+      }
+      if (/\/XObject/i.test(body)) {
+        return 'XObject';
+      }
+      if (/stream/i.test(body)) {
+        return 'Stream object';
+      }
+      return 'Object';
+    }
+
+    function buildObjectSummary(objNum, generation, type, rects, pageIndex) {
+      const parts = [`${objNum} ${generation} obj`];
+      if (type) {
+        parts.push(type);
+      }
+      if (typeof pageIndex === 'number') {
+        parts.push(`Page ${pageIndex + 1}`);
+      }
+      if (rects && rects.length) {
+        const rect = rects[0];
+        parts.push(`Rect ${rect.map((n) => n.toFixed(1)).join(', ')}`);
+      }
+      return parts.join(' • ');
+    }
+
+    function hexToBytes(hex) {
+      if (!hex) return new Uint8Array();
+      const cleaned = hex.replace(/[^0-9a-fA-F]/g, '');
+      const bytes = new Uint8Array(cleaned.length / 2);
+      for (let i = 0; i < cleaned.length; i += 2) {
+        bytes[i / 2] = parseInt(cleaned.substring(i, i + 2), 16);
+      }
+      return bytes;
+    }
+
+    function bytesToHex(bytes) {
+      return Array.from(bytes)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+    }
+
+    function parseTime(node) {
+      if (!node) return null;
+      const str = decoderLatin1.decode(node.value);
+      if (/^\d{12,14}Z$/.test(str)) {
+        const year = str.slice(0, 4);
+        const month = str.slice(4, 6);
+        const day = str.slice(6, 8);
+        const hour = str.slice(8, 10);
+        const minute = str.slice(10, 12);
+        const second = str.length >= 14 ? str.slice(12, 14) : '00';
+        return `${year}-${month}-${day} ${hour}:${minute}:${second}Z`;
+      }
+      return str;
+    }
+
+    function decodeOid(bytes) {
+      if (!bytes || !bytes.length) return null;
+      let oid = [];
+      let value = 0;
+      let first = bytes[0];
+      oid.push(Math.floor(first / 40));
+      oid.push(first % 40);
+      value = 0;
+      for (let i = 1; i < bytes.length; i++) {
+        value = (value << 7) | (bytes[i] & 0x7f);
+        if ((bytes[i] & 0x80) === 0) {
+          oid.push(value);
+          value = 0;
+        }
+      }
+      return oid.join('.');
+    }
+
+    function decodeName(node) {
+      if (!node || !node.sub) return '';
+      const parts = [];
+      for (const rdn of node.sub) {
+        if (!rdn.sub) continue;
+        const attrs = [];
+        for (const attr of rdn.sub) {
+          const oid = attr.sub?.[0] ? decodeOid(attr.sub[0].value) : null;
+          const valueNode = attr.sub?.[1];
+          const value = valueNode ? decoderLatin1.decode(valueNode.value) : '';
+          if (oid) {
+            attrs.push(`${oid}=${value}`);
+          }
+        }
+        if (attrs.length) {
+          parts.push(attrs.join(', '));
+        }
+      }
+      return parts.join(' / ');
+    }
+
+    function readDer(bytes, offset = 0) {
+      if (offset >= bytes.length) {
+        throw new Error('Unexpected end of DER');
+      }
+      const initial = bytes[offset];
+      const typeClass = initial >> 6;
+      const constructed = (initial & 0x20) !== 0;
+      let tagNumber = initial & 0x1f;
+      let pos = offset + 1;
+      if (tagNumber === 0x1f) {
+        tagNumber = 0;
+        let b;
+        do {
+          if (pos >= bytes.length) {
+            throw new Error('Invalid long tag');
+          }
+          b = bytes[pos++];
+          tagNumber = (tagNumber << 7) | (b & 0x7f);
+        } while (b & 0x80);
+      }
+      if (pos >= bytes.length) {
+        throw new Error('Missing length');
+      }
+      let length = bytes[pos++];
+      if (length & 0x80) {
+        const numBytes = length & 0x7f;
+        length = 0;
+        for (let i = 0; i < numBytes; i++) {
+          if (pos >= bytes.length) {
+            throw new Error('Invalid length');
+          }
+          length = (length << 8) | bytes[pos++];
+        }
+      }
+      const startContent = pos;
+      const end = startContent + length;
+      if (end > bytes.length) {
+        throw new Error('Length beyond end');
+      }
+      const node = {
+        tag: initial,
+        typeClass,
+        constructed,
+        tagNumber,
+        length,
+        start: offset,
+        headerLength: startContent - offset,
+        valueOffset: startContent,
+        end,
+        value: bytes.slice(startContent, end),
+        raw: bytes.slice(offset, end),
+        sub: [],
+      };
+      if (constructed) {
+        let cursor = startContent;
+        while (cursor < end) {
+          const child = readDer(bytes, cursor);
+          node.sub.push(child);
+          cursor = child.end;
+        }
+      }
+      return node;
+    }
+
+    function findCertificateNode(certsNode, serialHex, issuerName) {
+      if (!certsNode) return { node: null, parsed: null };
+      serialHex = serialHex ? serialHex.toLowerCase() : null;
+      for (const child of certsNode.sub ?? []) {
+        let candidate = null;
+        if (child.tag === 0xa0 && child.sub && child.sub.length) {
+          candidate = child.sub[0];
+        } else if (child.tagNumber === 16) {
+          candidate = child;
+        }
+        if (!candidate) continue;
+        try {
+          const parsed = parseCertificate(candidate);
+          const serialMatches = !serialHex || (parsed.serialNumber && parsed.serialNumber.toLowerCase() === serialHex);
+          const issuerMatches = !issuerName || parsed.issuer === issuerName;
+          if (serialMatches && issuerMatches) {
+            return { node: candidate, parsed };
+          }
+          if (!serialHex && !issuerName) {
+            return { node: candidate, parsed };
+          }
+        } catch (error) {
+          console.warn('Certificate parse error', error);
+        }
+      }
+      return { node: null, parsed: null };
+    }
+
+    function parseCertificate(certNode) {
+      const tbs = certNode.sub?.[0];
+      if (!tbs) {
+        throw new Error('Missing tbsCertificate');
+      }
+      let idx = 0;
+      if (tbs.sub?.[0]?.tag === 0xa0) {
+        idx += 1; // version (ignored)
+      }
+      const serialNumberNode = tbs.sub?.[idx++];
+      const signatureNode = tbs.sub?.[idx++];
+      const issuerNode = tbs.sub?.[idx++];
+      const validityNode = tbs.sub?.[idx++];
+      const subjectNode = tbs.sub?.[idx++];
+      const subjectPublicKeyInfoNode = tbs.sub?.[idx++];
+      const notBefore = validityNode?.sub?.[0] ? parseTime(validityNode.sub[0]) : null;
+      const notAfter = validityNode?.sub?.[1] ? parseTime(validityNode.sub[1]) : null;
+      const algorithmOid = subjectPublicKeyInfoNode?.sub?.[0] ? decodeOid(subjectPublicKeyInfoNode.sub[0].sub?.[0]?.value) : null;
+      const algorithmParams = subjectPublicKeyInfoNode?.sub?.[0]?.sub?.[1] ? decodeOid(subjectPublicKeyInfoNode.sub[0].sub[1].value) : null;
+      return {
+        raw: certNode.raw,
+        tbsRaw: tbs.raw,
+        serialNumber: serialNumberNode ? bytesToHex(serialNumberNode.value) : null,
+        issuer: decodeName(issuerNode),
+        subject: decodeName(subjectNode),
+        notBefore,
+        notAfter,
+        publicKeyInfo: subjectPublicKeyInfoNode ? subjectPublicKeyInfoNode.raw : null,
+        publicKeyAlgorithm: algorithmOid,
+        publicKeyParameters: algorithmParams,
+      };
+    }
+
+    function parseSignedAttributes(attrNode) {
+      const attributes = [];
+      if (!attrNode?.sub) {
+        return { attributes, raw: attrNode ? attrNode.raw : new Uint8Array() };
+      }
+      for (const attribute of attrNode.sub) {
+        const oidNode = attribute.sub?.[0];
+        const valuesNode = attribute.sub?.[1];
+        const oid = oidNode ? decodeOid(oidNode.value) : null;
+        const values = valuesNode?.sub?.map((child) => child) ?? [];
+        if (oid) {
+          attributes.push({ oid, values });
+        }
+      }
+      return { attributes, raw: attrNode.raw };
+    }
+
+    function extractMessageDigest(attributes) {
+      const attr = attributes.find((item) => item.oid === '1.2.840.113549.1.9.4');
+      if (!attr) return null;
+      const valueNode = attr.values?.[0];
+      if (!valueNode) return null;
+      return new Uint8Array(valueNode.value);
+    }
+
+    function resolveCurveName(certificate, signatureAlgorithm) {
+      if (signatureAlgorithm && signatureAlgorithm.namedCurve) {
+        return signatureAlgorithm.namedCurve;
+      }
+      const oid = certificate?.publicKeyParameters;
+      switch (oid) {
+        case '1.2.840.10045.3.1.7':
+          return 'P-256';
+        case '1.3.132.0.34':
+          return 'P-384';
+        case '1.3.132.0.35':
+          return 'P-521';
+        default:
+          return null;
+      }
+    }
+
+    function algorithmFromOid(oid, fallbackDigest) {
+      switch (oid) {
+        case '1.2.840.113549.1.1.1':
+          return { name: 'RSASSA-PKCS1-v1_5', hash: { name: fallbackDigest || 'SHA-256' } };
+        case '1.2.840.113549.1.1.5':
+          return { name: 'RSASSA-PKCS1-v1_5', hash: { name: 'SHA-1' } };
+        case '1.2.840.113549.1.1.11':
+          return { name: 'RSASSA-PKCS1-v1_5', hash: { name: 'SHA-256' } };
+        case '1.2.840.113549.1.1.12':
+          return { name: 'RSASSA-PKCS1-v1_5', hash: { name: 'SHA-384' } };
+        case '1.2.840.113549.1.1.13':
+          return { name: 'RSASSA-PKCS1-v1_5', hash: { name: 'SHA-512' } };
+        case '1.2.840.10045.4.3.2':
+          return { name: 'ECDSA', hash: { name: 'SHA-256' }, namedCurve: 'P-256' };
+        case '1.2.840.10045.4.3.3':
+          return { name: 'ECDSA', hash: { name: 'SHA-384' }, namedCurve: 'P-384' };
+        case '1.2.840.10045.4.3.4':
+          return { name: 'ECDSA', hash: { name: 'SHA-512' }, namedCurve: 'P-521' };
+        default:
+          return null;
+      }
+    }
+
+    function digestNameFromOid(oid) {
+      switch (oid) {
+        case '1.3.14.3.2.26':
+          return 'SHA-1';
+        case '2.16.840.1.101.3.4.2.1':
+          return 'SHA-256';
+        case '2.16.840.1.101.3.4.2.2':
+          return 'SHA-384';
+        case '2.16.840.1.101.3.4.2.3':
+          return 'SHA-512';
+        default:
+          return null;
+      }
+    }
+
+    function convertEcdsaDerToRaw(der, size) {
+      const node = readDer(der, 0);
+      if (node.tagNumber !== 16 || !node.sub || node.sub.length < 2) {
+        throw new Error('Invalid ECDSA signature DER');
+      }
+      const r = node.sub[0].value;
+      const s = node.sub[1].value;
+      const output = new Uint8Array(size * 2);
+      output.set(r.slice(Math.max(0, r.length - size)), size - Math.min(size, r.length));
+      output.set(s.slice(Math.max(0, s.length - size)), size * 2 - Math.min(size, s.length));
+      return output;
+    }
+
+    async function verifySignature(pdfBytes, byteRange, contentsHex) {
+      if (!byteRange || !contentsHex) {
+        return { status: 'missing', message: 'No embedded signature detected.' };
+      }
+      const signatureBytes = hexToBytes(contentsHex);
+      if (!signatureBytes.length) {
+        return { status: 'missing', message: 'Signature container empty.' };
+      }
+      const signedData = new Uint8Array(byteRange[1] + byteRange[3]);
+      signedData.set(pdfBytes.slice(byteRange[0], byteRange[0] + byteRange[1]), 0);
+      signedData.set(pdfBytes.slice(byteRange[2], byteRange[2] + byteRange[3]), byteRange[1]);
+      let digestOid = null;
+      let signatureAlgorithmOid = null;
+      let certificate = null;
+      try {
+        const cmsRoot = readDer(signatureBytes, 0);
+        if (!cmsRoot.sub || cmsRoot.sub.length < 2) {
+          throw new Error('Invalid CMS signature container.');
+        }
+        const contentTypeOid = decodeOid(cmsRoot.sub[0].value);
+        if (contentTypeOid !== '1.2.840.113549.1.7.2') {
+          throw new Error('CMS content type is not SignedData.');
+        }
+        const signedDataNode = cmsRoot.sub[1];
+        if (!signedDataNode.sub || !signedDataNode.sub.length) {
+          throw new Error('Missing SignedData block.');
+        }
+        const signedDataSequence = signedDataNode.sub[0];
+        const sdChildren = signedDataSequence.sub;
+        let idx = 0;
+        const versionNode = sdChildren[idx++];
+        const digestAlgorithmsNode = sdChildren[idx++];
+        const encapContentInfoNode = sdChildren[idx++];
+        let certificatesNode = null;
+        if (sdChildren[idx] && sdChildren[idx].tag === 0xa0) {
+          certificatesNode = sdChildren[idx++];
+        }
+        if (sdChildren[idx] && sdChildren[idx].tag === 0xa1) {
+          idx += 1; // skip CRLs
+        }
+        const signerInfosNode = sdChildren[idx];
+        const signerInfo = signerInfosNode?.sub?.[0];
+        if (!signerInfo) {
+          throw new Error('No signer info available.');
+        }
+        const signerIdentifier = signerInfo.sub?.[1];
+        let signerSerialHex = null;
+        let signerIssuerName = null;
+        if (signerIdentifier?.sub?.length >= 2) {
+          signerIssuerName = decodeName(signerIdentifier.sub[0]);
+          signerSerialHex = bytesToHex(signerIdentifier.sub[1].value);
+        }
+        const digestAlgorithmNode = signerInfo.sub?.[2];
+        digestOid = digestAlgorithmNode?.sub?.[0] ? decodeOid(digestAlgorithmNode.sub[0].value) : null;
+        const digestName = digestNameFromOid(digestOid) || 'SHA-256';
+        const signedAttrsNode = signerInfo.sub?.[3];
+        const { attributes, raw: signedAttrsRaw } = parseSignedAttributes(signedAttrsNode);
+        const messageDigest = extractMessageDigest(attributes);
+        if (!messageDigest) {
+          throw new Error('Signed attributes missing messageDigest.');
+        }
+        const computedDigestBuffer = await crypto.subtle.digest(digestName, signedData);
+        const computedDigest = new Uint8Array(computedDigestBuffer);
+        const digestMatch = bytesToHex(computedDigest) === bytesToHex(messageDigest);
+        const signatureAlgorithmNode = signerInfo.sub?.[4];
+        signatureAlgorithmOid = signatureAlgorithmNode?.sub?.[0] ? decodeOid(signatureAlgorithmNode.sub[0].value) : null;
+        const signatureNode = signerInfo.sub?.[5];
+        const signatureValue = new Uint8Array(signatureNode?.value ?? new Uint8Array());
+        const { node: certificateNode, parsed: parsedCertificate } = findCertificateNode(certificatesNode, signerSerialHex, signerIssuerName);
+        if (!certificateNode || !parsedCertificate) {
+          throw new Error('Embedded certificate not present.');
+        }
+        certificate = parsedCertificate;
+        let signatureAlgorithm = algorithmFromOid(signatureAlgorithmOid, digestName);
+        if (signatureAlgorithm && certificate.publicKeyAlgorithm === '1.2.840.113549.1.1.1' && signatureAlgorithm.name === 'ECDSA') {
+          signatureAlgorithm = { name: 'RSASSA-PKCS1-v1_5', hash: { name: digestName || 'SHA-256' } };
+        } else if (signatureAlgorithm && certificate.publicKeyAlgorithm === '1.2.840.10045.2.1' && signatureAlgorithm.name !== 'ECDSA') {
+          signatureAlgorithm = { name: 'ECDSA', hash: { name: digestName || 'SHA-256' }, namedCurve: resolveCurveName(certificate, signatureAlgorithm) };
+        }
+        if (!signatureAlgorithm) {
+          if (certificate.publicKeyAlgorithm === '1.2.840.113549.1.1.1') {
+            signatureAlgorithm = { name: 'RSASSA-PKCS1-v1_5', hash: { name: digestName || 'SHA-256' } };
+          } else if (certificate.publicKeyAlgorithm === '1.2.840.10045.2.1') {
+            signatureAlgorithm = { name: 'ECDSA', hash: { name: digestName || 'SHA-256' }, namedCurve: resolveCurveName(certificate, null) };
+          }
+        }
+        if (!signatureAlgorithm) {
+          throw new Error(`Unsupported signature algorithm: ${signatureAlgorithmOid || certificate.publicKeyAlgorithm || 'unknown'}`);
+        }
+        const signedAttrsForVerification = new Uint8Array(signedAttrsRaw);
+        if (signedAttrsForVerification.length) {
+          signedAttrsForVerification[0] = 0x31;
+        }
+        let signatureToVerify = signatureValue;
+        if (signatureAlgorithm.name === 'ECDSA') {
+          let size = 32;
+          if (signatureAlgorithm.namedCurve === 'P-384') {
+            size = 48;
+          } else if (signatureAlgorithm.namedCurve === 'P-521') {
+            size = 66;
+          }
+          signatureToVerify = convertEcdsaDerToRaw(signatureValue, size);
+        }
+        const curveName = resolveCurveName(certificate, signatureAlgorithm);
+        const importParams = signatureAlgorithm.name === 'ECDSA'
+          ? { name: 'ECDSA', namedCurve: curveName || 'P-256' }
+          : { name: 'RSASSA-PKCS1-v1_5', hash: signatureAlgorithm.hash };
+        const verifyParams = signatureAlgorithm.name === 'ECDSA'
+          ? { name: 'ECDSA', hash: signatureAlgorithm.hash }
+          : { name: 'RSASSA-PKCS1-v1_5', hash: signatureAlgorithm.hash };
+        const cryptoKey = await crypto.subtle.importKey(
+          'spki',
+          certificate.publicKeyInfo,
+          importParams,
+          false,
+          ['verify']
+        );
+        const signatureValid = await crypto.subtle.verify(
+          verifyParams,
+          cryptoKey,
+          signatureToVerify,
+          signedAttrsForVerification
+        );
+        const diagnostics = {
+          digestOid,
+          signatureAlgorithmOid,
+          signatureLength: signatureValue.length,
+          signedAttrsLength: signedAttrsForVerification.length,
+          certificateAlgorithm: certificate.publicKeyAlgorithm,
+          curveName,
+        };
+        return {
+          status: digestMatch && signatureValid ? 'valid' : 'invalid',
+          digestMatch,
+          signatureValid,
+          digestName,
+          computedDigest,
+          messageDigest,
+          certificate,
+          signatureAlgorithm: signatureAlgorithmOid,
+          diagnostics,
+          message: digestMatch && signatureValid ? 'Signature is cryptographically valid.' : 'Signature validation failed.',
+        };
+      } catch (error) {
+        console.error('Signature verification error:', error);
+        return { status: 'error', message: error.message || 'Signature verification failed.', errorStack: error.stack, diagnostics: { digestOid, signatureAlgorithmOid, certificateAlgorithm: certificate?.publicKeyAlgorithm } };
+      }
+    }
+
+    function renderSignatureSummary(signatureInfo) {
+      elements.signatureSummary.innerHTML = '';
+      if (!signatureInfo) {
+        return;
+      }
+      const statusTag = document.createElement('span');
+      const statusClass = signatureInfo.status === 'valid' ? 'valid' : signatureInfo.status === 'invalid' ? 'invalid' : 'warning';
+      statusTag.className = 'status-tag ' + statusClass;
+      let statusText = 'No signature';
+      if (signatureInfo.status === 'valid') {
+        statusText = 'Valid signature';
+      } else if (signatureInfo.status === 'invalid') {
+        statusText = 'Invalid signature';
+      } else if (signatureInfo.status === 'error') {
+        statusText = 'Signature error';
+      }
+      statusTag.textContent = statusText;
+      elements.signatureSummary.appendChild(statusTag);
+      if (signatureInfo.certificate) {
+        const certLine = document.createElement('div');
+        certLine.innerHTML = `<strong>Subject:</strong> ${signatureInfo.certificate.subject || 'Unknown'}`;
+        elements.signatureSummary.appendChild(certLine);
+        const issuerLine = document.createElement('div');
+        issuerLine.innerHTML = `<strong>Issuer:</strong> ${signatureInfo.certificate.issuer || 'Unknown'}`;
+        elements.signatureSummary.appendChild(issuerLine);
+        if (signatureInfo.certificate.notBefore && signatureInfo.certificate.notAfter) {
+          const validityLine = document.createElement('div');
+          validityLine.innerHTML = `<strong>Validity:</strong> ${signatureInfo.certificate.notBefore} → ${signatureInfo.certificate.notAfter}`;
+          elements.signatureSummary.appendChild(validityLine);
+        }
+      } else {
+        const message = document.createElement('div');
+        message.textContent = signatureInfo.message;
+        elements.signatureSummary.appendChild(message);
+      }
+    }
+
+    function clearViewer() {
+      elements.pdfViewer.innerHTML = '';
+      state.overlayLayers.clear();
+      state.pageViewports.clear();
+      state.pageBoxes.clear();
+      state.pageCanvases.clear();
+    }
+
+    function createPageContainer(pageIndex, viewport) {
+      const container = document.createElement('div');
+      container.className = 'page-container';
+      container.style.width = `${viewport.width}px`;
+      container.style.height = `${viewport.height}px`;
+
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = viewport.width;
+      finalCanvas.height = viewport.height;
+      finalCanvas.dataset.type = 'final';
+
+      const signedCanvas = document.createElement('canvas');
+      signedCanvas.width = viewport.width;
+      signedCanvas.height = viewport.height;
+      signedCanvas.dataset.type = 'signed';
+      signedCanvas.style.display = 'none';
+
+      const overlay = document.createElement('div');
+      overlay.className = 'overlay-layer';
+
+      container.append(finalCanvas, signedCanvas, overlay);
+      elements.pdfViewer.appendChild(container);
+      state.overlayLayers.set(pageIndex, overlay);
+      state.pageCanvases.set(pageIndex, { finalCanvas, signedCanvas });
+      state.pageViewports.set(pageIndex, viewport);
+      return { container, finalCanvas, signedCanvas, overlay };
+    }
+
+    async function renderDocuments(finalBytes, baseBytes, objects) {
+      setLoading(true);
+      clearViewer();
+      const renderToken = ++state.renderToken;
+      try {
+        const finalDocTask = pdfjsLib.getDocument({ data: finalBytes });
+        const baseDocTask = baseBytes ? pdfjsLib.getDocument({ data: baseBytes }) : null;
+        const finalDoc = await finalDocTask.promise;
+        let baseDoc = null;
+        if (baseDocTask) {
+          try {
+            baseDoc = await baseDocTask.promise;
+          } catch (error) {
+            console.warn('Unable to load signed snapshot:', error);
+            baseDoc = null;
+          }
+        }
+        if (renderToken !== state.renderToken) {
+          return;
+        }
+        state.currentDoc = finalDoc;
+        state.baseDoc = baseDoc;
+        const pageCount = finalDoc.numPages;
+        const scale = 1.3;
+        for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+          if (renderToken !== state.renderToken) {
+            return;
+          }
+          const page = await finalDoc.getPage(pageNumber);
+          const viewport = page.getViewport({ scale });
+          state.pageBoxes.set(pageNumber - 1, page.view || [0, 0, viewport.width / scale, viewport.height / scale]);
+          const { finalCanvas, signedCanvas } = createPageContainer(pageNumber - 1, viewport);
+          const finalContext = finalCanvas.getContext('2d');
+          await page.render({ canvasContext: finalContext, viewport }).promise;
+          if (baseDoc && pageNumber <= baseDoc.numPages) {
+            try {
+              const basePage = await baseDoc.getPage(pageNumber);
+              const baseViewport = basePage.getViewport({ scale });
+              signedCanvas.width = baseViewport.width;
+              signedCanvas.height = baseViewport.height;
+              const signedContext = signedCanvas.getContext('2d');
+              await basePage.render({ canvasContext: signedContext, viewport: baseViewport }).promise;
+            } catch (error) {
+              console.warn('Failed to render base page', pageNumber, error);
+            }
+          }
+        }
+        await mapObjectsToPages(finalDoc, objects);
+        renderObjectList(objects);
+        applyViewMode(state.viewMode);
+      } catch (error) {
+        console.error('Render error:', error);
+        elements.pdfViewer.innerHTML = `<div class="empty-state">Failed to render PDF: ${error.message}</div>`;
+      } finally {
+        setLoading(false);
+      }
+    }
+
+
+    function guessPageFromGeometry(rects) {
+      if (!rects || !rects.length) {
+        return null;
+      }
+      for (const [pageIndex, box] of state.pageBoxes.entries()) {
+        const [xMin, yMin, xMax, yMax] = box;
+        for (const rect of rects) {
+          const [rx1, ry1, rx2, ry2] = rect;
+          const within = rx1 >= xMin - 5 && ry1 >= yMin - 5 && rx2 <= xMax + 5 && ry2 <= yMax + 5;
+          if (within) {
+            return pageIndex;
+          }
+        }
+      }
+      if (state.pageBoxes.size === 1) {
+        return 0;
+      }
+      return null;
+    }
+    async function mapObjectsToPages(doc, objects) {
+      for (const obj of objects) {
+        let resolved = false;
+        if (obj.pageRef) {
+          try {
+            const ref = typeof pdfjsLib.Ref === 'function' ? new pdfjsLib.Ref(obj.pageRef.num, obj.pageRef.gen) : obj.pageRef;
+            const pageIndex = await doc.getPageIndex(ref);
+            obj.pageIndex = pageIndex;
+            obj.summary = buildObjectSummary(obj.objNum, obj.generation, obj.type, obj.rects, pageIndex);
+            resolved = true;
+          } catch (error) {
+            console.warn('Failed to resolve page reference', obj.pageRef, error);
+          }
+        }
+        if (!resolved) {
+          obj.pageIndex = guessPageFromGeometry(obj.rects);
+          if (typeof obj.pageIndex === 'number') {
+            obj.summary = buildObjectSummary(obj.objNum, obj.generation, obj.type, obj.rects, obj.pageIndex);
+          }
+        }
+      }
+    }
+
+    function renderObjectList(objects) {
+      elements.objectList.innerHTML = '';
+      if (!objects.length) {
+        elements.objectList.classList.add('empty-state');
+        elements.objectList.textContent = 'No incremental objects detected beyond the signed range.';
+        return;
+      }
+      elements.objectList.classList.remove('empty-state');
+      for (const obj of objects) {
+        const entry = document.createElement('div');
+        entry.className = 'object-entry';
+        entry.dataset.obj = `${obj.objNum}-${obj.generation}`;
+
+        const header = document.createElement('div');
+        header.className = 'object-header';
+
+        const label = document.createElement('label');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = obj.active;
+        checkbox.addEventListener('change', () => {
+          toggleObjectOverlay(obj, checkbox.checked);
+          entry.classList.toggle('active', checkbox.checked);
+        });
+        const title = document.createElement('span');
+        title.textContent = obj.summary;
+        label.append(checkbox, title);
+
+        const actions = document.createElement('div');
+        actions.className = 'object-actions';
+        const detailsBtn = document.createElement('button');
+        detailsBtn.type = 'button';
+        detailsBtn.textContent = 'Show raw';
+        detailsBtn.addEventListener('click', () => {
+          const expanded = entry.classList.toggle('show-raw');
+          detailsBtn.textContent = expanded ? 'Hide raw' : 'Show raw';
+        });
+        actions.appendChild(detailsBtn);
+
+        header.append(label, actions);
+        entry.appendChild(header);
+
+        const meta = document.createElement('div');
+        meta.className = 'object-meta';
+        meta.innerHTML = `Offset: ${obj.offset} • ${obj.rects.length ? 'Rectangles: ' + obj.rects.length : 'No geometry extracted'}`;
+        if (typeof obj.pageIndex === 'number') {
+          meta.innerHTML += ` • Page ${obj.pageIndex + 1}`;
+        }
+        entry.appendChild(meta);
+
+        const raw = document.createElement('pre');
+        raw.className = 'object-raw';
+        raw.textContent = obj.content.slice(0, 2000);
+        entry.appendChild(raw);
+
+        elements.objectList.appendChild(entry);
+      }
+    }
+
+    function toggleObjectOverlay(obj, active) {
+      obj.active = active;
+      if (!obj.rects.length || typeof obj.pageIndex !== 'number') {
+        return;
+      }
+      const overlay = state.overlayLayers.get(obj.pageIndex);
+      const viewport = state.pageViewports.get(obj.pageIndex);
+      if (!overlay || !viewport) {
+        return;
+      }
+      if (!obj.overlayElements.length && active) {
+        for (const rect of obj.rects) {
+          const highlight = document.createElement('div');
+          highlight.className = 'highlight-box';
+          const [x1, y1, x2, y2] = viewport.convertToViewportRectangle(rect);
+          const left = Math.min(x1, x2);
+          const top = Math.min(y1, y2);
+          const width = Math.abs(x1 - x2);
+          const height = Math.abs(y1 - y2);
+          highlight.style.left = `${left}px`;
+          highlight.style.top = `${top}px`;
+          highlight.style.width = `${width}px`;
+          highlight.style.height = `${height}px`;
+          overlay.appendChild(highlight);
+          obj.overlayElements.push(highlight);
+        }
+      }
+      for (const element of obj.overlayElements) {
+        element.style.display = active ? 'block' : 'none';
+      }
+    }
+
+    function applyViewMode(mode) {
+      state.viewMode = mode;
+      for (const canvases of state.pageCanvases.values()) {
+        const { finalCanvas, signedCanvas } = canvases;
+        if (mode === 'final') {
+          finalCanvas.style.display = 'block';
+          signedCanvas.style.display = 'none';
+          signedCanvas.style.position = 'static';
+          signedCanvas.style.opacity = '1';
+          signedCanvas.style.mixBlendMode = 'normal';
+        } else if (mode === 'signed') {
+          finalCanvas.style.display = 'none';
+          signedCanvas.style.display = 'block';
+          signedCanvas.style.position = 'static';
+          signedCanvas.style.opacity = '1';
+          signedCanvas.style.mixBlendMode = 'normal';
+        } else if (mode === 'compare') {
+          finalCanvas.style.display = 'block';
+          signedCanvas.style.display = 'block';
+          signedCanvas.style.position = 'absolute';
+          signedCanvas.style.left = '0';
+          signedCanvas.style.top = '0';
+          signedCanvas.style.opacity = '0.6';
+          signedCanvas.style.mixBlendMode = 'multiply';
+        }
+      }
+    }
+
+    async function handleBytes(bytes, fileName) {
+      state.finalBytes = new Uint8Array(bytes);
+      state.fileName = fileName;
+      const pdfText = decoderLatin1.decode(bytes);
+      const byteRange = parseByteRange(pdfText);
+      state.byteRange = byteRange;
+      let baseBytes = null;
+      let objects = [];
+      if (byteRange) {
+        const signedLength = byteRange[2] + byteRange[3];
+        baseBytes = state.finalBytes.slice(0, signedLength);
+        const incrementalStart = signedLength;
+        const tailBytes = state.finalBytes.slice(incrementalStart);
+        const tailText = decoderLatin1.decode(tailBytes);
+        objects = parseIncrementalObjects(tailText, incrementalStart);
+      } else {
+        objects = [];
+      }
+      state.baseBytes = baseBytes;
+      state.objects = objects;
+      const signatureHex = parseSignatureContents(pdfText);
+      const signatureInfo = await verifySignature(state.finalBytes, byteRange, signatureHex);
+      state.signatureInfo = signatureInfo;
+      renderSignatureSummary(signatureInfo);
+      const summaryEntries = [
+        ['File', fileName],
+        ['Signature', signatureInfo.message || (signatureInfo.status === 'valid' ? 'Valid' : signatureInfo.status === 'missing' ? 'Unavailable' : 'Error')],
+        ['ByteRange', byteRange ? byteRange.join(', ') : 'not present'],
+        ['Incremental objects', objects.length.toString()],
+      ];
+      updateSummary(summaryEntries);
+      await renderDocuments(state.finalBytes, state.baseBytes, state.objects);
+    }
+
+    elements.dropZone.addEventListener('click', () => {
+      elements.fileInput.click();
+    });
+
+    elements.fileInput.addEventListener('change', (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        handleBytes(new Uint8Array(reader.result), file.name);
+      };
+      reader.readAsArrayBuffer(file);
+    });
+
+    elements.dropZone.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      elements.dropZone.classList.add('dragover');
+    });
+
+    elements.dropZone.addEventListener('dragleave', () => {
+      elements.dropZone.classList.remove('dragover');
+    });
+
+    elements.dropZone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      elements.dropZone.classList.remove('dragover');
+      const file = event.dataTransfer?.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        handleBytes(new Uint8Array(reader.result), file.name);
+      };
+      reader.readAsArrayBuffer(file);
+    });
+
+    elements.viewMode.addEventListener('change', (event) => {
+      applyViewMode(event.target.value);
+    });
+
+    elements.showAll.addEventListener('click', () => {
+      for (const obj of state.objects) {
+        obj.active = true;
+        toggleObjectOverlay(obj, true);
+      }
+      for (const checkbox of elements.objectList.querySelectorAll('input[type="checkbox"]')) {
+        checkbox.checked = true;
+        checkbox.closest('.object-entry')?.classList.add('active');
+      }
+    });
+
+    elements.hideAll.addEventListener('click', () => {
+      for (const obj of state.objects) {
+        obj.active = false;
+        toggleObjectOverlay(obj, false);
+      }
+      for (const checkbox of elements.objectList.querySelectorAll('input[type="checkbox"]')) {
+        checkbox.checked = false;
+        checkbox.closest('.object-entry')?.classList.remove('active');
+      }
+    });
+  </script>
+</body>
+</html>

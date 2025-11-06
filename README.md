@@ -1,4 +1,4 @@
-# SignTail Inspector
+# [SignTail Inspector](https://davidnemecek.github.io/SignTail-Inspector/)
 
 ## Beschreibung
 SignTail Inspector ist eine vollständig lokale HTML-Anwendung, die signierte PDFs parallel rendert und forensisch analysiert. Eine eingebettete, offline ausgelieferte pdf.js-Engine stellt sowohl den signierten Grundzustand als auch die inkrementellen Nachträge dar. Gefundene Objekte lassen sich per Checkbox gezielt aktivieren, sodass ihre Inhalte als Overlay direkt in der Vorschau erscheinen oder ausgeblendet bleiben. Alle Schritte laufen offline im Browser – es werden keinerlei Dateien hochgeladen.
